@@ -6,7 +6,7 @@
   "author": "csnasci",
   "license": "MIT",
   "homepage": "https://github.com/csnasci/omarchy-sessions",
-  "description": "Save your sessions and bring them back exactly as they were: the same apps, in the same positions, whenever you need them.",
+  "description": "Get back to work, to your games or to your daily routine in one click. Set up a workspace the way you like it, save it as a session, and Sessions reopens the same apps, at the same size and in the same position, every time.",
   "kinds": [
     "bar-widget"
   ],
@@ -15,7 +15,7 @@
   },
   "barWidget": {
     "displayName": "Sessions",
-    "description": "Save Session, then click a saved session to restore its windows and layout",
+    "description": "Save the current workspace as a session; click a session to reopen its apps at the same size and position",
     "category": "Utilities",
     "allowMultiple": false,
     "defaultSection": "right"

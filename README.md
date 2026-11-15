@@ -1,12 +1,12 @@
 # Omarchy Sessions
 
-Save your sessions and bring them back exactly as they were: the same apps, in the same positions, whenever you need them.
+Get back to work, to your games or to your daily routine in one click.
 
-Save a workspace as a named session (Work, Games, Study...) and restore it later, apps and layout, with one click from the Omarchy bar.
+Set up a workspace the way you like it (your editor here, the browser there, the chat in the corner) and save it as a session called *Work*, *Games* or *Study*. Later, one click on that session in the Omarchy bar reopens the same apps, **at the same size and in the same position, every time**. You don't have to open each app and drag windows around again.
 
 ![Sessions panel](preview.png)
 
-- **Save Session** stores the apps open on the current workspace, with their tiling arrangement and floating windows.
+- **Save Session** stores the apps open on the current workspace, with their size, position, tiling arrangement and floating windows.
 - Each saved session is a card with its name and the icons of its apps. **Click a card** to restore it. The **✕** in the corner deletes it after a second click.
 - A session opens on the current workspace if it is empty. Otherwise it opens on the first empty one, so it never mixes with what you already have open.
 - While a session restores, a thin ring around the bar icon fills up as the apps appear. It ends in your theme's green when everything was placed, yellow when something was missing, and red when the restore failed.
