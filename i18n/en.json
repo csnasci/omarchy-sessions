@@ -1,0 +1,18 @@
+{
+  "tooltip": "Sessions",
+  "save": "Save Session",
+  "namePlaceholder": "Session name",
+  "invalidName": "Use letters, numbers, space, . - _ (max 32)",
+  "replaceHint": "Enter replaces the saved \"%1\"",
+  "empty": "No saved sessions yet",
+  "deleteTooltip": "Delete",
+  "notify.saved": "Session \"%1\" saved",
+  "notify.saveFailed": "Could not save \"%1\"",
+  "notify.restored": "Session \"%1\" restored",
+  "notify.restoredCount": "Session \"%1\" restored: %2 of %3 windows in place",
+  "notify.restoreFailed": "Could not restore \"%1\"",
+  "confirmShort": "Delete?",
+  "moreApps": "+%1",
+  "restoringTip": "Restoring %1… %2 of %3 apps",
+  "notify.alreadyOpen": "%1 was already open on workspace %2"
+}

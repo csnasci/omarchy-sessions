@@ -1,0 +1,18 @@
+{
+  "tooltip": "Sessões",
+  "save": "Salvar sessão",
+  "namePlaceholder": "Nome da sessão",
+  "invalidName": "Use letras, números, espaço, . - _ (máx. 32)",
+  "replaceHint": "Enter substitui a sessão \"%1\"",
+  "empty": "Nenhuma sessão salva ainda",
+  "deleteTooltip": "Apagar",
+  "notify.saved": "Sessão \"%1\" salva",
+  "notify.saveFailed": "Não foi possível salvar \"%1\"",
+  "notify.restored": "Sessão \"%1\" restaurada",
+  "notify.restoredCount": "Sessão \"%1\" restaurada: %2 de %3 janelas no lugar",
+  "notify.restoreFailed": "Não foi possível restaurar \"%1\"",
+  "confirmShort": "Apagar?",
+  "moreApps": "+%1",
+  "restoringTip": "Restaurando %1… %2 de %3 apps",
+  "notify.alreadyOpen": "%1 já estava aberto no workspace %2"
+}

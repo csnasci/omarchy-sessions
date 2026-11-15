@@ -1,0 +1,41 @@
+--- a/hypr-layout (leftydevkit/hypr-layout @ f51756f)
++++ b/hypr-layout (omarchy-sessions)
+@@ -1,4 +1,6 @@
+ #!/usr/bin/env python3
++# Modified copy for omarchy-sessions (from leftydevkit/hypr-layout @ f51756f, MIT);
++# changes are listed in vendor/hypr-layout.patch next to this file.
+ """hypr-layout — snapshot and replay the Hyprland window layout.
+ 
+ Reopening a work setup by hand is: launch app, launch app, launch app, then
+@@ -988,8 +990,13 @@
+     instead of taking whichever one happens to be first.
+     """
+     pool = defaultdict(list)
++    # omarchy-sessions: only reuse windows already on this workspace, so a
++    # replay never drags in a window from another workspace.
++    only = os.environ.get("HYPR_LAYOUT_POOL_WORKSPACE")
+     if not force:
+         for c in clients():
++            if only and workspace_of(c) != only:
++                continue
+             pool[family(c.get("class") or "?")].append(c)
+     return pool
+ 
+@@ -1725,7 +1732,7 @@
+     """Entries collapsed into tiles — a window group tiles as a single unit."""
+     out = []
+     for i, e in enumerate(entries):
+-        if not addresses.get(i):
++        if not addresses.get(i) or e.get("floating"):
+             continue
+         key = e.get("group") or f"entry{i}"
+         tile = next((t for t in out if t["key"] == key), None)
+@@ -1863,7 +1870,7 @@
+         side = "r" if node["split"] == "v" else "d"
+         second_owner = insert(leftmost(node["second"]), owner, side)
+         if second_owner and abs(node["ratio"] - 0.5) > 0.04 and focus_checked(owner):
+-            dispatch(f'hl.dsp.layout("splitratio {node["ratio"]:.3f}")')
++            dispatch(f'hl.dsp.layout("splitratio {2 * node["ratio"]:.3f} exact")')
+             time.sleep(0.08)
+         expand(node["first"], owner)
+         if second_owner:

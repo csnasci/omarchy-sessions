@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.csnasci.sessions",
+  "name": "Sessions",
+  "version": "1.0.0",
+  "author": "csnasci",
+  "license": "MIT",
+  "homepage": "https://github.com/csnasci/omarchy-sessions",
+  "description": "Save the windows of a workspace as a named session and bring them back, apps and layout, with one click",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Sessions",
+    "description": "Save Session, then click a saved session to restore its windows and layout",
+    "category": "Utilities",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

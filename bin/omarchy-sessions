@@ -1,0 +1,420 @@
+#!/usr/bin/env -S python3 -I
+"""omarchy-sessions: named Hyprland sessions, one workspace each.
+
+  omarchy-sessions list [--json]    saved session names (--json: with their apps)
+  omarchy-sessions save <name>      save the windows of the current workspace
+  omarchy-sessions restore <name>   open them on this workspace (or the first empty one)
+  omarchy-sessions delete <name>    remove a saved session
+
+A session is the windows of ONE workspace. Restoring launches each app the
+way Omarchy's launcher does (its .desktop entry through uwsm-app), waits for
+the real windows (splash screens come and go, some apps rename their window),
+gathers them on the target workspace, and then lets the vendored hypr-layout
+rebuild the arrangement. Windows already open elsewhere are never touched.
+
+Sessions live in ${XDG_DATA_HOME:-~/.local/share}/omarchy-sessions/<name>.json;
+logs of the last 30 runs in ${XDG_STATE_HOME:-~/.local/state}/omarchy-sessions/logs.
+"""
+import json
+import os
+import shlex
+import subprocess
+import sys
+import tempfile
+import time
+from collections import Counter
+
+HERE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+HYPR_LAYOUT = os.path.join(HERE, "vendor", "hypr-layout")
+DATA = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"),
+                    "omarchy-sessions")
+LOGS = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+                    "omarchy-sessions", "logs")
+FORMAT = 2               # sessions saved before this (whole desktop) are refused
+WAIT_LIMIT = 25.0        # seconds to wait for every app's window
+QUIET = 6.0              # ...but give up sooner once nothing new appears this long
+SETTLE = 1.5             # the set of new windows must hold still this long
+KEEP_LOGS = 30
+
+LOG = []
+
+
+def log(msg):
+    LOG.append(f"{time.strftime('%H:%M:%S')} {msg}")
+
+
+def die(msg):
+    log(f"error: {msg}")
+    print(f"omarchy-sessions: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def progress(fraction, done, total):
+    """One stdout line the panel turns into the ring around its bar icon."""
+    print(f"progress {max(0.0, min(1.0, fraction)):.2f} {done}/{total}", flush=True)
+
+
+def keep_log(action, name):
+    try:
+        os.makedirs(LOGS, exist_ok=True)
+        path = os.path.join(LOGS, f"{time.strftime('%Y%m%d-%H%M%S')}-{action}-{name}.log")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(LOG) + "\n")
+        logs = sorted((os.path.join(LOGS, n) for n in os.listdir(LOGS) if n.endswith(".log")),
+                      key=os.path.getmtime, reverse=True)
+        for old in logs[KEEP_LOGS:]:
+            os.remove(old)
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------- names
+
+def is_alnum(c):
+    return c.isdigit() or c.lower() != c.upper()
+
+
+def check_name(name):
+    """Same rule as Panel.qml: letters (accents ok), digits, space . - _ ;
+    1-32 chars; starts with a letter or digit; no "..". Safe as a file name."""
+    ok = (1 <= len(name) <= 32 and ".." not in name and is_alnum(name[0])
+          and all(is_alnum(c) or c in " ._-" for c in name[1:]))
+    if not ok:
+        die("invalid name: use letters, numbers, space, . - _ (max 32)")
+    return name
+
+
+def session_path(name):
+    return os.path.join(DATA, name + ".json")
+
+
+# ---------------------------------------------------------------- hyprland
+
+def hyprctl_json(*what):
+    out = subprocess.run(["hyprctl", "-j", *what], capture_output=True, text=True, timeout=5)
+    return json.loads(out.stdout or "null")
+
+
+def dispatch(lua):
+    r = subprocess.run(["hyprctl", "dispatch", lua], capture_output=True, text=True, timeout=5)
+    log(f"  dispatch {lua} -> {r.stdout.strip() or r.stderr.strip()}")
+
+
+def clients():
+    return [c for c in (hyprctl_json("clients") or []) if c.get("mapped", True)]
+
+
+def active_workspace():
+    return int(hyprctl_json("activeworkspace")["id"])
+
+
+def windows_on(ws):
+    return [c for c in clients() if c["workspace"]["id"] == ws]
+
+
+def get_option(name):
+    try:
+        return bool((hyprctl_json("getoption", name) or {}).get("bool", True))
+    except Exception:
+        return True
+
+
+def set_focus_on_activate(value):
+    lua = f"hl.config({{ misc = {{ focus_on_activate = {'true' if value else 'false'} }} }})"
+    r = subprocess.run(["hyprctl", "eval", lua], capture_output=True, text=True, timeout=5)
+    log(f"  focus_on_activate={value} -> {r.stdout.strip() or r.stderr.strip()}")
+
+
+def first_empty_workspace():
+    used = {c["workspace"]["id"] for c in clients()}
+    n = 1
+    while n in used:
+        n += 1
+    return n
+
+
+# ---------------------------------------------------------------- .desktop
+
+def desktop_dirs():
+    home = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    rest = os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
+    return [os.path.join(b, "applications") for b in [home] + rest.split(":") if b]
+
+
+def desktop_fields(path):
+    fields, group = {}, None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("["):
+                    group = line
+                elif group == "[Desktop Entry]" and "=" in line:
+                    k, v = line.split("=", 1)
+                    fields.setdefault(k, v)
+    except OSError:
+        pass
+    return fields
+
+
+def desktop_index():
+    """desktop id -> fields, earlier data dirs winning (user over system)."""
+    index = {}
+    for d in desktop_dirs():
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            continue
+        for n in names:
+            if n.endswith(".desktop") and n not in index:
+                index[n] = desktop_fields(os.path.join(d, n))
+    return index
+
+
+def desktop_for(cls, index):
+    """The .desktop entry that opens windows of this class, or None."""
+    if not cls:
+        return None
+    for want in (lambda w: w == cls, lambda w: w.lower() == cls.lower()):
+        for did, f in index.items():
+            if f.get("NoDisplay") == "true" and f.get("StartupWMClass") is None:
+                continue
+            if want(f.get("StartupWMClass", "")):
+                return did
+    for did in (cls + ".desktop", cls.lower() + ".desktop"):
+        if did in index:
+            return did
+    return None
+
+
+# ---------------------------------------------------------------- hypr-layout
+
+def run_hypr_layout(args, label, workspace=None):
+    cmd = ["python3", "-I", HYPR_LAYOUT] + args
+    env = dict(os.environ)
+    if workspace is not None:
+        env["HYPR_LAYOUT_POOL_WORKSPACE"] = str(workspace)   # local patch, see vendor/
+    log(f"$ {' '.join(shlex.quote(a) for a in cmd)}")
+    r = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    for line in (r.stdout + r.stderr).splitlines():
+        log(f"  [{label}] {line}")
+    return r
+
+
+# ---------------------------------------------------------------- commands
+
+def session_apps(name):
+    """Distinct apps of a session, in saved order: [{desktop, class}]."""
+    try:
+        with open(session_path(name), encoding="utf-8") as f:
+            entries = json.load(f).get("entries", [])
+    except (OSError, ValueError):
+        return []
+    seen, apps = set(), []
+    for e in entries:
+        key = e.get("desktop") or e.get("class") or ""
+        if key and key not in seen:
+            seen.add(key)
+            apps.append({"desktop": e.get("desktop") or "", "class": e.get("class") or ""})
+    return apps
+
+
+def cmd_list(as_json=False):
+    try:
+        names = [n[:-5] for n in os.listdir(DATA) if n.endswith(".json")]
+    except OSError:
+        names = []
+    names.sort(key=str.lower)
+    if as_json:
+        print(json.dumps([{"name": n, "apps": session_apps(n)} for n in names], ensure_ascii=False))
+        return
+    for n in names:
+        print(n)
+
+
+def cmd_save(name):
+    ws = active_workspace()
+    log(f"save {name!r} from workspace {ws}")
+    with tempfile.TemporaryDirectory() as tmp:
+        snap = os.path.join(tmp, "snap.json")
+        r = run_hypr_layout(["-f", snap, "save", "--floating"], "save")
+        if r.returncode != 0 or not os.path.exists(snap):
+            die("hypr-layout could not save the layout")
+        with open(snap, encoding="utf-8") as f:
+            full = json.load(f)
+    entries = [e for e in full.get("entries", []) if str(e.get("workspace")) == str(ws)]
+    if not entries:
+        die(f"workspace {ws} has no windows to save")
+    index = desktop_index()
+    for e in entries:
+        e["desktop"] = desktop_for(e.get("class"), index)
+        log(f"  {e['class']!r} -> {e['desktop'] or 'no .desktop, will use ' + ' '.join(e.get('cmd') or [])}")
+    session = {"format": FORMAT, "name": name, "saved_at": full.get("saved_at"),
+               "workspace": ws, "monitors": full.get("monitors"), "entries": entries}
+    os.makedirs(DATA, exist_ok=True)
+    tmp = session_path(name) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(session, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp, session_path(name))
+    print(f"saved {len(entries)} windows from workspace {ws}")
+
+
+def launch(entry):
+    did = entry.get("desktop")
+    if did:
+        argv = ["uwsm-app", "--", "gtk-launch", did]
+    else:
+        argv = ["uwsm-app", "--"] + list(entry.get("cmd") or [])
+        if len(argv) == 2:
+            log(f"  cannot launch {entry['class']!r}: no .desktop and no command")
+            return
+    log(f"  launch {entry['class']!r}: {' '.join(shlex.quote(a) for a in argv)}")
+    try:
+        subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        log(f"  launch failed: {exc}")
+
+
+def wait_for_windows(before, need, total=0):
+    """New windows (not in `before`) per class, once every class has what it
+    needs and the set held still for SETTLE seconds, or at WAIT_LIMIT."""
+    start = time.time()
+    stable_since, last = None, None
+    while True:
+        new = [c for c in clients() if c["address"] not in before]
+        have = Counter(c["class"] for c in new)
+        done = all(have[k] >= n for k, n in need.items())
+        got = sum(min(have[k], n) for k, n in need.items())
+        key = tuple(sorted((c["address"], c["class"]) for c in new))
+        if key != last:
+            last, stable_since = key, time.time()
+            names = ", ".join("%s@%s" % (c["class"], c["workspace"]["name"]) for c in new)
+            log(f"  new windows: {names or '-'}")
+            if total:
+                progress(0.05 + 0.75 * got / total, got, total)
+        if done and time.time() - stable_since >= SETTLE:
+            return new
+        if new and time.time() - stable_since >= QUIET:
+            log("  nothing new for a while; going on with what opened")
+            return new
+        if time.time() - start >= WAIT_LIMIT:
+            log("  gave up waiting")
+            return new
+        time.sleep(0.3)
+
+
+def cmd_restore(name):
+    path = session_path(name)
+    if not os.path.exists(path):
+        die(f"no session named {name!r}")
+    with open(path, encoding="utf-8") as f:
+        session = json.load(f)
+    if session.get("format") != FORMAT:
+        die(f"{name!r} was saved by an older version (whole desktop); save it again")
+    entries = session["entries"]
+
+    ws = active_workspace()
+    if windows_on(ws):
+        ws = first_empty_workspace()
+        log(f"current workspace is busy; using empty workspace {ws}")
+        dispatch(f'hl.dsp.focus({{ workspace = "{ws}" }})')
+        time.sleep(0.2)
+    log(f"restore {name!r} ({len(entries)} windows) on workspace {ws}")
+    progress(0.02, 0, len(entries))
+
+    before = {c["address"] for c in clients()}
+    need = Counter(e["class"] for e in entries)
+    # An app that allows one window (Disks, Sublime...) answers a second launch
+    # by activating the window it has, and Omarchy's focus_on_activate would
+    # pull the screen over to it. Hold that off while the apps start.
+    focus_on_activate = get_option("misc:focus_on_activate")
+    set_focus_on_activate(False)
+    try:
+        for e in entries:
+            launch(e)
+        new = wait_for_windows(before, need, len(entries))
+    finally:
+        set_focus_on_activate(focus_on_activate)
+
+    # Claim the new windows each entry class needs; leave anything else alone.
+    pool = {}
+    for c in new:
+        pool.setdefault(c["class"], []).append(c)
+    kept, claimed, missing = [], [], []
+    for e in entries:
+        cands = pool.get(e["class"]) or []
+        cands.sort(key=lambda c: c["workspace"]["id"] != ws)   # already here first
+        if cands:
+            c = cands.pop(0)
+            claimed.append(c)
+            kept.append(dict(e, workspace=str(ws)))
+        else:
+            log(f"  missing: {e['class']!r} opened no new window")
+            missing.append(e)
+    for c in claimed:
+        if c["workspace"]["id"] != ws:
+            dispatch(f'hl.dsp.window.move({{ workspace = "{ws}", follow = false, '
+                     f'window = "address:{c["address"]}" }})')
+
+    # A missing app that has a window on another workspace allows only one
+    # window (Disks...): tell the panel where it is, by its .desktop name.
+    index = None
+    for e in missing:
+        elsewhere = [c for c in clients() if c["class"] == e["class"] and c["workspace"]["id"] != ws]
+        if elsewhere:
+            if index is None:
+                index = desktop_index()
+            label = (index.get(e.get("desktop") or "", {}).get("Name") or e["class"]).replace("\t", " ")
+            print(f"already-open {elsewhere[0]['workspace']['name']}\t{label}", flush=True)
+
+    placed = 0
+    progress(0.85, len(kept), len(entries))
+    if kept:
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = os.path.join(tmp, "plan.json")
+            with open(plan, "w", encoding="utf-8") as f:
+                json.dump({"saved_at": session.get("saved_at"), "monitors": session.get("monitors"),
+                           "entries": kept}, f)
+            r = run_hypr_layout(["-f", plan, "--no-progress", "restore", "--no-verify"], "arrange",
+                                workspace=ws)
+        for line in (r.stdout + r.stderr).splitlines():
+            if line.lstrip().startswith("ok "):
+                placed += 1
+
+    dispatch(f'hl.dsp.focus({{ workspace = "{ws}" }})')
+    progress(1.0, len(kept), len(entries))
+    print(f"{placed}/{len(entries)} windows placed on workspace {ws}", flush=True)
+    if placed == 0:
+        sys.exit(1)
+
+
+def cmd_delete(name):
+    try:
+        os.remove(session_path(name))
+    except FileNotFoundError:
+        pass
+
+
+def main():
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip().split("\n\n")[0])
+        return
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "list":
+        return cmd_list(as_json=rest == ["--json"])
+    if cmd not in ("save", "restore", "delete") or len(rest) != 1:
+        print(__doc__.strip().split("\n\n")[0], file=sys.stderr)
+        sys.exit(1)
+    name = check_name(rest[0])
+    try:
+        {"save": cmd_save, "restore": cmd_restore, "delete": cmd_delete}[cmd](name)
+    finally:
+        if cmd != "delete":
+            keep_log(cmd, name)
+
+
+if __name__ == "__main__":
+    main()
