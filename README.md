@@ -1,6 +1,8 @@
 # Omarchy Sessions
 
-Save the windows of a workspace as a named session and bring them back, apps and layout, with one click from the Omarchy bar.
+Save your sessions and bring them back exactly as they were: the same apps, in the same positions, whenever you need them.
+
+Save a workspace as a named session (Work, Games, Study...) and restore it later, apps and layout, with one click from the Omarchy bar.
 
 ![Sessions panel](preview.png)
 

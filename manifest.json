@@ -6,7 +6,7 @@
   "author": "csnasci",
   "license": "MIT",
   "homepage": "https://github.com/csnasci/omarchy-sessions",
-  "description": "Save the windows of a workspace as a named session and bring them back, apps and layout, with one click",
+  "description": "Save your sessions and bring them back exactly as they were: the same apps, in the same positions, whenever you need them.",
   "kinds": [
     "bar-widget"
   ],
