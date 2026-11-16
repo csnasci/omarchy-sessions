@@ -231,6 +231,7 @@ def window_pid(entry, clients_now):
 def run_hypr_layout(args, label, workspace=None):
     cmd = ["python3", "-I", HYPR_LAYOUT] + args
     env = dict(os.environ)
+    env["HYPR_LAYOUT_NO_NOTIFY"] = "1"          # local patch: the panel notifies, not hypr-layout
     if workspace is not None:
         env["HYPR_LAYOUT_POOL_WORKSPACE"] = str(workspace)   # local patch, see vendor/
     log(f"$ {' '.join(shlex.quote(a) for a in cmd)}")
@@ -311,6 +312,7 @@ def cmd_save(name):
 
 
 def launch(entry):
+    """Start one app; False when there is nothing it may be launched with."""
     did = entry.get("desktop")
     if did:
         argv = ["uwsm-app", "--", "gtk-launch", did]
@@ -321,7 +323,7 @@ def launch(entry):
         if not cmd:
             log(f"  cannot launch {entry['class']!r}: no .desktop and no trusted command"
                 f"{' (saved by an older version; save the session again)' if entry.get('cmd') else ''}")
-            return
+            return False
         argv = ["uwsm-app", "--"] + cmd
     log(f"  launch {entry['class']!r}: {' '.join(shlex.quote(a) for a in argv)}")
     try:
@@ -329,6 +331,8 @@ def launch(entry):
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as exc:
         log(f"  launch failed: {exc}")
+        return False
+    return True
 
 
 def wait_for_windows(before, need, total=0):
@@ -379,16 +383,17 @@ def cmd_restore(name):
     progress(0.02, 0, len(entries))
 
     before = {c["address"] for c in clients()}
-    need = Counter(e["class"] for e in entries)
     # An app that allows one window (Disks, Sublime...) answers a second launch
     # by activating the window it has, and Omarchy's focus_on_activate would
     # pull the screen over to it. Hold that off while the apps start.
     focus_on_activate = get_option("misc:focus_on_activate")
     set_focus_on_activate(False)
     try:
-        for e in entries:
-            launch(e)
-        new = wait_for_windows(before, need, len(entries))
+        launched = [e for e in entries if launch(e)]
+        # Wait only for what was started; an app that could not be launched
+        # would otherwise hold the restore until the QUIET timeout.
+        need = Counter(e["class"] for e in launched)
+        new = wait_for_windows(before, need, len(entries)) if launched else []
     finally:
         set_focus_on_activate(focus_on_activate)
 

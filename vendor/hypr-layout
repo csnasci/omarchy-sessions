@@ -610,6 +610,9 @@ def warn(message):
     the story is.
     """
     print(f"  warning: {message}")
+    # omarchy-sessions: the caller reports the outcome itself.
+    if os.environ.get("HYPR_LAYOUT_NO_NOTIFY"):
+        return
     if sys.stdout.isatty() or not shutil.which("notify-send"):
         return
     body = message if LOG is None else f"{message}\ntrace: {LOG_PATH}"

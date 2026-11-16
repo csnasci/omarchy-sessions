@@ -7,7 +7,17 @@
  """hypr-layout — snapshot and replay the Hyprland window layout.
  
  Reopening a work setup by hand is: launch app, launch app, launch app, then
-@@ -988,8 +990,13 @@
+@@ -608,6 +610,9 @@
+     the story is.
+     """
+     print(f"  warning: {message}")
++    # omarchy-sessions: the caller reports the outcome itself.
++    if os.environ.get("HYPR_LAYOUT_NO_NOTIFY"):
++        return
+     if sys.stdout.isatty() or not shutil.which("notify-send"):
+         return
+     body = message if LOG is None else f"{message}\ntrace: {LOG_PATH}"
+@@ -988,8 +993,13 @@
      instead of taking whichever one happens to be first.
      """
      pool = defaultdict(list)
@@ -21,7 +31,7 @@
              pool[family(c.get("class") or "?")].append(c)
      return pool
  
-@@ -1725,7 +1732,7 @@
+@@ -1725,7 +1735,7 @@
      """Entries collapsed into tiles — a window group tiles as a single unit."""
      out = []
      for i, e in enumerate(entries):
@@ -30,7 +40,7 @@
              continue
          key = e.get("group") or f"entry{i}"
          tile = next((t for t in out if t["key"] == key), None)
-@@ -1863,7 +1870,7 @@
+@@ -1863,7 +1873,7 @@
          side = "r" if node["split"] == "v" else "d"
          second_owner = insert(leftmost(node["second"]), owner, side)
          if second_owner and abs(node["ratio"] - 0.5) > 0.04 and focus_checked(owner):
