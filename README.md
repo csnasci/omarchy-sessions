@@ -55,8 +55,30 @@ The same commands work without the shell through `bin/omarchy-sessions list | sa
 ## Limitations
 
 - **Single-window apps.** Some apps keep a single window, such as GNOME Disks, and Spotify or Discord in some setups. If one is already open on another workspace, it does not open a second window. The session then restores without it and the notification says where it is. Hyprland marks that workspace as urgent, which shows as red in the workspace widget.
+- **Omarchy's agent terminal** (`omarchy-agent`, Super + Shift + Ctrl + A) has no `.desktop` entry yet, so it is not relaunched. See below for a workaround.
 - **Terminals** come back as fresh terminals. What ran inside them, and their working directory, is not restored.
 - **App state** is the app's own business. A restore reopens apps; it does not reopen documents or tabs unless the app does that by itself.
+
+### Restoring an app that has no `.desktop` entry
+
+You can write the entry yourself. The plugin still only runs what an installed `.desktop` entry says, and this one is yours.
+
+Omarchy's agent terminal is the common case: it opens with the app-id `org.omarchy.agent`, and Omarchy does not ship an entry for it yet ([omacom/omarchy#13777](https://github.com/omacom/omarchy/pull/13777) adds one). Until then, save this as `~/.local/share/applications/org.omarchy.agent.desktop`:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=Agent
+Comment=Omarchy coding agent
+Exec=omarchy-agent
+TryExec=omarchy-agent
+Icon=utilities-terminal
+Terminal=false
+StartupWMClass=org.omarchy.agent
+NoDisplay=true
+```
+
+Then save the session again. `StartupWMClass` must match the window's class (`hyprctl clients` shows it), and `NoDisplay=true` keeps the entry out of the app launcher. The same recipe works for any app that runs under its own class. Once Omarchy ships its own entry, delete yours, since a file in `~/.local/share/applications` takes precedence over the system one.
 
 ## Remove
 
