@@ -32,6 +32,8 @@ Restoring takes three steps:
 2. **Wait.** The plugin waits for the real windows. Splash screens come and go, and some apps rename their window after it opens. Windows that land on another workspace are brought over.
 3. **Arrange.** [hypr-layout](https://github.com/leftydevkit/hypr-layout) rebuilds the tiling tree, split ratios and floating geometry.
 
+An app with no `.desktop` entry is relaunched from the command line of its process, but only when that process runs unconfined, in the same namespaces as your session. The command line of a sandboxed app (Flatpak, Firejail, bwrap) is under the app's control, so it is never saved or replayed: such an app is restored only through its `.desktop` entry.
+
 Windows on other workspaces are never moved or closed. During the launch the plugin turns Hyprland's `misc:focus_on_activate` off, so an app cannot pull you to another workspace, and turns it back on afterwards.
 
 Sessions live in `~/.local/share/omarchy-sessions/<name>.json`. Logs of the last 30 runs live in `~/.local/state/omarchy-sessions/logs/`.

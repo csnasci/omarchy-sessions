@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.csnasci.sessions",
   "name": "Sessions",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "csnasci",
   "license": "MIT",
   "homepage": "https://github.com/csnasci/omarchy-sessions",

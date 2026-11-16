@@ -187,6 +187,45 @@ def desktop_for(cls, index):
     return None
 
 
+# ---------------------------------------------------------------- command fallback
+#
+# An app with no .desktop entry is relaunched from the command line of its
+# process, read from /proc/<pid>/cmdline. Both the window class (which decides
+# whether a .desktop matches) and that command line are under the app's
+# control: a process can rewrite its own argv. Replaying it from an app inside
+# a sandbox (Flatpak, Firejail, bwrap...) would run an app-chosen command on the
+# host, outside the sandbox. So the command is only kept when the process
+# shares our namespaces and root, i.e. when it already runs with the same
+# authority the replay would give it, and restore only replays commands that
+# passed this check.
+
+NAMESPACES = ("mnt", "user", "pid")
+
+
+def same_confinement(pid):
+    """True when process `pid` lives in our mount, user and pid namespaces and
+    sees the same root. Any doubt (gone, unreadable, pid 0) counts as False."""
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        for ns in NAMESPACES:
+            if os.stat(f"/proc/{pid}/ns/{ns}").st_ino != os.stat(f"/proc/self/ns/{ns}").st_ino:
+                return False
+        return os.readlink(f"/proc/{pid}/root") == os.readlink("/proc/self/root")
+    except OSError:
+        return False
+
+
+def window_pid(entry, clients_now):
+    """The pid of the one live window that matches a saved entry, or None.
+    hypr-layout entries carry no address, so match on class + geometry and
+    refuse anything ambiguous."""
+    hits = [c for c in clients_now
+            if (c.get("class") or c.get("initialClass") or "?") == entry.get("class")
+            and c.get("at") == entry.get("at") and c.get("size") == entry.get("size")]
+    return hits[0].get("pid") if len(hits) == 1 else None
+
+
 # ---------------------------------------------------------------- hypr-layout
 
 def run_hypr_layout(args, label, workspace=None):
@@ -246,9 +285,20 @@ def cmd_save(name):
     if not entries:
         die(f"workspace {ws} has no windows to save")
     index = desktop_index()
+    clients_now = clients()
     for e in entries:
         e["desktop"] = desktop_for(e.get("class"), index)
-        log(f"  {e['class']!r} -> {e['desktop'] or 'no .desktop, will use ' + ' '.join(e.get('cmd') or [])}")
+        if e["desktop"]:
+            e.pop("cmd", None)            # launched through the .desktop only
+            log(f"  {e['class']!r} -> {e['desktop']}")
+        elif e.get("cmd") and same_confinement(window_pid(e, clients_now)):
+            e["cmd_trusted"] = True
+            log(f"  {e['class']!r} -> no .desktop, will use "
+                f"{' '.join(shlex.quote(a) for a in e['cmd'])}")
+        else:
+            e.pop("cmd", None)
+            log(f"  {e['class']!r} -> no .desktop, and its process is sandboxed or unknown: "
+                f"command not kept, it will not be relaunched")
     session = {"format": FORMAT, "name": name, "saved_at": full.get("saved_at"),
                "workspace": ws, "monitors": full.get("monitors"), "entries": entries}
     os.makedirs(DATA, exist_ok=True)
@@ -265,10 +315,14 @@ def launch(entry):
     if did:
         argv = ["uwsm-app", "--", "gtk-launch", did]
     else:
-        argv = ["uwsm-app", "--"] + list(entry.get("cmd") or [])
-        if len(argv) == 2:
-            log(f"  cannot launch {entry['class']!r}: no .desktop and no command")
+        # Only commands that passed same_confinement() at save time; sessions
+        # saved by 1.0.0 lack the mark and must be saved again.
+        cmd = list(entry.get("cmd") or []) if entry.get("cmd_trusted") is True else []
+        if not cmd:
+            log(f"  cannot launch {entry['class']!r}: no .desktop and no trusted command"
+                f"{' (saved by an older version; save the session again)' if entry.get('cmd') else ''}")
             return
+        argv = ["uwsm-app", "--"] + cmd
     log(f"  launch {entry['class']!r}: {' '.join(shlex.quote(a) for a in argv)}")
     try:
         subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL,
