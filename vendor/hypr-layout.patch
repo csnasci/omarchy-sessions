@@ -31,7 +31,16 @@
              pool[family(c.get("class") or "?")].append(c)
      return pool
  
-@@ -1725,7 +1735,7 @@
+@@ -1064,6 +1074,8 @@
+ 
+ def spawn(entry):
+     """Start the app, detached from this process."""
++    if os.environ.get("HYPR_LAYOUT_NO_LAUNCH"):   # omarchy-sessions
++        return None
+     argv = split_command(entry["cmd"])
+     cwd = entry.get("cwd")
+     if cwd and cwd != HOME and not os.path.isdir(cwd):
+@@ -1725,7 +1737,7 @@
      """Entries collapsed into tiles — a window group tiles as a single unit."""
      out = []
      for i, e in enumerate(entries):
@@ -40,7 +49,7 @@
              continue
          key = e.get("group") or f"entry{i}"
          tile = next((t for t in out if t["key"] == key), None)
-@@ -1863,7 +1873,7 @@
+@@ -1863,7 +1875,7 @@
          side = "r" if node["split"] == "v" else "d"
          second_owner = insert(leftmost(node["second"]), owner, side)
          if second_owner and abs(node["ratio"] - 0.5) > 0.04 and focus_checked(owner):
@@ -49,3 +58,15 @@
              time.sleep(0.08)
          expand(node["first"], owner)
          if second_owner:
+@@ -2006,6 +2018,11 @@
+                       "(focused the window already open)")
+             elif is_webapp_window(e["class"]) and not args.force:
+                 web_apps.append(e)
++            elif os.environ.get("HYPR_LAYOUT_NO_LAUNCH"):
++                # omarchy-sessions: the caller starts the apps itself; never
++                # launch a saved command line from here.
++                addresses[i] = None
++                warn(f"{e['class']}: no open window to place, not launched")
+             else:
+                 to_launch.append(i)
+ 

@@ -1074,6 +1074,8 @@ def match_existing(pool, entries):
 
 def spawn(entry):
     """Start the app, detached from this process."""
+    if os.environ.get("HYPR_LAYOUT_NO_LAUNCH"):   # omarchy-sessions
+        return None
     argv = split_command(entry["cmd"])
     cwd = entry.get("cwd")
     if cwd and cwd != HOME and not os.path.isdir(cwd):
@@ -2016,6 +2018,11 @@ def cmd_restore(args):
                       "(focused the window already open)")
             elif is_webapp_window(e["class"]) and not args.force:
                 web_apps.append(e)
+            elif os.environ.get("HYPR_LAYOUT_NO_LAUNCH"):
+                # omarchy-sessions: the caller starts the apps itself; never
+                # launch a saved command line from here.
+                addresses[i] = None
+                warn(f"{e['class']}: no open window to place, not launched")
             else:
                 to_launch.append(i)
 
